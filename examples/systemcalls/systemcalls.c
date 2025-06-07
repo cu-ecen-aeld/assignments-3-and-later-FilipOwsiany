@@ -1,5 +1,12 @@
 #include "systemcalls.h"
 
+#include <sys/types.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdbool.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -9,14 +16,15 @@
 */
 bool do_system(const char *cmd)
 {
-
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
-
+    if (NULL == cmd)
+    {
+        return false;
+    }
+    int result = system(cmd);
+    if (result == -1)
+    {
+        return false; // system call failed
+    }
     return true;
 }
 
@@ -38,9 +46,9 @@ bool do_exec(int count, ...)
 {
     va_list args;
     va_start(args, count);
-    char * command[count+1];
+    char * command[count + 1];
     int i;
-    for(i=0; i<count; i++)
+    for(i = 0; i < count; i++)
     {
         command[i] = va_arg(args, char *);
     }
@@ -58,6 +66,37 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        int result = execv(command[0], command);
+        if (result == -1) {
+            perror("execv failed");
+            _exit(1);
+        }        
+    } else if (pid > 0) {
+        int status;
+        int result = waitpid(pid, &status, 0);
+        if (result == -1) {
+            perror("waitpid failed");
+            return false;
+        }
+        if (WIFEXITED(status)) {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status != 0) {
+                fprintf(stderr, "Command exited with status %d\n", exit_status);
+                return false;
+            }
+        } else {
+            perror("Command did not terminate normally\n");
+            return false;
+        }
+
+    } else {
+        perror("fork failed");
+        return false;
+    }
 
     va_end(args);
 
@@ -92,6 +131,45 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+        if (dup2(fd, 1) < 0) 
+        { 
+            perror("dup2"); 
+            _exit(1);
+        }
+        close(fd);
+        // Execute the command with execv
+        int result = execv(command[0], command);
+        if (result == -1) {
+            perror("execv failed");
+            _exit(1);
+        }        
+    } else if (pid > 0) {
+        int status;
+        int result = waitpid(pid, &status, 0);
+        if (result == -1) {
+            perror("waitpid failed");
+            return false;
+        }
+        if (WIFEXITED(status)) {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status != 0) {
+                fprintf(stderr, "Command exited with status %d\n", exit_status);
+                return false;
+            }
+        } else {
+            perror("Command did not terminate normally\n");
+            return false;
+        }
+
+    } else {
+        perror("fork failed");
+        return false;
+    }
 
     va_end(args);
 
