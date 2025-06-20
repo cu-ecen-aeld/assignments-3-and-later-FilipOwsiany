@@ -3,6 +3,8 @@
 #include <string.h>
 #include <syslog.h>
 
+const char* version = "1.0.0";
+
 void log_and_exit(const char *msg, const char *filename, int exit_code) {
     if (filename)
         syslog(LOG_ERR, msg, filename);
@@ -15,6 +17,7 @@ void log_and_exit(const char *msg, const char *filename, int exit_code) {
 }
 
 int main(int argc, char *argv[]) {
+    printf("Writer version: %s\n", version);
     openlog("writer", LOG_PID, LOG_USER);
 
     if (argc != 3) {
