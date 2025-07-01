@@ -200,7 +200,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;  
-    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");  
+    serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);  
     serverAddr.sin_port = htons(9000);  
 
     if (bind(serverSockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) 
