@@ -126,7 +126,7 @@ void SIGTERMHandler(int signum, siginfo_t *info, void *extra)
 void setSignalSIGINTHandler(void)
 {
     struct sigaction action;
-
+    memset(&action, 0, sizeof(action));
     action.sa_flags = SIGINT;     
     action.sa_sigaction = SIGINTHandler;
     sigaction(SIGINT, &action, NULL);
@@ -135,7 +135,7 @@ void setSignalSIGINTHandler(void)
 void setSignalSIGTERMHandler(void)
 {
     struct sigaction action;
-
+    memset(&action, 0, sizeof(action));
     action.sa_flags = SIGTERM;     
     action.sa_sigaction = SIGTERMHandler;
     sigaction(SIGTERM, &action, NULL);
@@ -245,7 +245,10 @@ int main(int argc, char *argv[]) {
 
             bufferPacket[bufferPacketIndex++] = buffer;
 
-            ssize_t recvLen = recv(newSockFd, buffer, BUFFER_SIZE, 0);
+            ssize_t recvLen = recv(newSockFd, buffer, BUFFER_SIZE - 1, 0);
+            if (recvLen >= 0 && recvLen < BUFFER_SIZE) {
+                buffer[recvLen] = '\0';
+            }
 
             if (recvLen < 0) 
             {
@@ -262,7 +265,6 @@ int main(int argc, char *argv[]) {
             }      
             
             printf("Received %zd bytes from %s\n", recvLen, inet_ntoa(clientAddr.sin_addr));
-            printf("Received data: %s\n", buffer);
 
             if (checkForNullCharInString(buffer, recvLen)) 
             {
@@ -283,8 +285,7 @@ int main(int argc, char *argv[]) {
                     {
                         continue;
                     }
-                    fprintf(fptr, "%s", bufferPacket[i]);
-                    printf("Received packet[%ld]: %s\n", i, bufferPacket[i]);
+                    fwrite(bufferPacket[i], 1, strlen(bufferPacket[i]), fptr);
                 }
 
                 fclose(fptr);
@@ -307,7 +308,6 @@ int main(int argc, char *argv[]) {
                             logAndExit("Failed to read from file", __FILE__, EXIT_FAILURE);
                         }
                     }
-                    printf("Sending data: %s\n", bufferSend);
                     send(newSockFd, bufferSend, bytesRead, 0);
                     memset(bufferSend, 0, sizeof(bufferSend));
                 }

@@ -1,0 +1,34 @@
+#!/bin/sh
+
+DAEMON="/usr/bin/aesdsocket"
+PIDFILE="/var/run/aesdsocket.pid"
+
+case "$1" in
+    start)
+        echo "Starting aesdsocket..."
+        start-stop-daemon --start --background \
+            --make-pidfile --pidfile "$PIDFILE" \
+            --exec "$DAEMON" -- -d
+        ;;
+    stop)
+        echo "Stopping aesdsocket..."
+        start-stop-daemon --stop --pidfile "$PIDFILE" --retry 5
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    status)
+        if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
+            echo "aesdsocket is running."
+        else
+            echo "aesdsocket is not running."
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
+
+exit 0
