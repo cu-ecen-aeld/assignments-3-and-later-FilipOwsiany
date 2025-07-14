@@ -1,6 +1,6 @@
 # Allow overriding by external environment (like Yocto)
 CC ?= gcc
-CFLAGS += -Wall -Werror -g -pthread
+CFLAGS += -Wall -Wextra -Werror -g -pthread
 LDFLAGS += -lrt
 
 TARGET = aesdsocket

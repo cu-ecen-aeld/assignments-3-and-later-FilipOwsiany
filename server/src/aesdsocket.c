@@ -195,12 +195,18 @@ bool checkForNewlineCharInString(const char *str, const ssize_t len, ssize_t *ne
 
 void SIGINTHandler(int signum, siginfo_t *info, void *extra)
 {
+    (void)signum; // Unused parameter
+    (void)info;   // Unused parameter
+    (void)extra;  // Unused parameter
     printf("Handler SIGINT, thread ID: %ld\n", syscall(SYS_gettid));
     stop = 1;
 }
 
 void SIGTERMHandler(int signum, siginfo_t *info, void *extra)
 {
+    (void)signum; // Unused parameter
+    (void)info;   // Unused parameter
+    (void)extra;  // Unused parameter
     printf("Handler SIGTERM, thread ID: %ld\n", syscall(SYS_gettid));
     stop = 1;
 }
@@ -225,6 +231,7 @@ void setSignalSIGTERMHandler(void)
 
 void* timestampWriterHandler(void* arg)
 {
+    (void)arg; // Unused parameter
     while (1)
     {
         struct pollfd pfd;
