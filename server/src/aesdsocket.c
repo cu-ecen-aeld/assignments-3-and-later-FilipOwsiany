@@ -123,7 +123,8 @@ void cleanupMain(void)
 {
     if (timestampThreadStarted && pipeTimestampWriterHandler[1] > 0) 
     {
-        write(pipeTimestampWriterHandler[1], "x", 1);
+        ssize_t res = write(pipeTimestampWriterHandler[1], "x", 1);
+        (void)res; // Unused variable
         pthread_join(timestampThread, NULL);
     }
     
@@ -131,7 +132,8 @@ void cleanupMain(void)
     {
         for (int i = 0; i < threadCount; i++) 
         {
-            write(pipeClientHandler[1], "x", 1);
+            ssize_t res = write(pipeClientHandler[1], "x", 1);
+            (void)res; // Unused variable
         }
     }
 
@@ -268,7 +270,8 @@ void* timestampWriterHandler(void* arg)
         else if (pfd.revents & POLLIN)
         {
             char buf[1];
-            read(pipeTimestampWriterHandler[0], buf, 1);
+            ssize_t res = read(pipeTimestampWriterHandler[0], buf, 1);
+            (void)res; // Unused variable
             printf("Timestamp writer thread terminating...\n");
             break;
         }
@@ -320,7 +323,8 @@ void* clientHandler(void* arg)
 
         if (fds[1].revents & POLLIN) {
             char tmp;
-            read(pipeClientHandler[0], &tmp, 1);
+            ssize_t res = read(pipeClientHandler[0], &tmp, 1);
+            (void)res; // Unused variable
             printf("Receiver thread terminating...\n");
             break;
         }
