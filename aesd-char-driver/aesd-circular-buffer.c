@@ -87,7 +87,9 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     
     size_t current_offset = 0;
     size_t buffer_index = buffer->out_offs;
-    for (size_t i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
+
+    size_t i;
+    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
     {   
         my_printf("entry %zu\n", buffer_index);
         my_printf("entry %zu: buffptr: %p\n", 
@@ -180,7 +182,8 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 */
 void aesd_circular_buffer_cleanup(struct aesd_circular_buffer *buffer)
 {
-    for (size_t i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
+    size_t i = 0;
+    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
     {
         if(buffer->entry[i].buffptr != NULL)
         {

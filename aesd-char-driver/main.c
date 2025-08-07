@@ -17,6 +17,7 @@
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
+#include <linux/slab.h>
 #include "aesdchar.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
@@ -94,7 +95,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     }
 
     bool newline = false;
-    for (size_t i = 0; i < count; i++) {
+    size_t i = 0;
+    for (i = 0; i < count; i++) {
         if (kbuf[i] == '\n') {
             newline = true;
             break;
@@ -129,7 +131,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         memcpy(current_command_done + dev->current_command_size, kbuf, count);
         kfree(current_command_part_last);
 
-        for (size_t i = 0; i < dev->current_command_size + count; i++)
+        size_t i = 0;
+        for (i = 0; i < dev->current_command_size + count; i++)
         {
             PDEBUG("byte: %d\n", current_command_done[i]);
         }
@@ -168,7 +171,8 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         dev->current_command = current_command_part;
         dev->current_command_size = dev->current_command_size + count;
 
-        for (size_t i = 0; i < dev->current_command_size; i++)
+        size_t i = 0;
+        for (i = 0; i < dev->current_command_size; i++)
         {
             PDEBUG("byte: %d\n", dev->current_command[i]);
         }
