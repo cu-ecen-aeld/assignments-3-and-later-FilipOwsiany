@@ -15,8 +15,10 @@
 #include <poll.h>
 #include <pthread.h>
 
-#define BUFFER_SIZE 512
-#define MAX_THREADS 128
+#define BUFFER_SIZE             512
+#define MAX_THREADS             128
+
+#define USE_AESD_CHAR_DEVICE    1
 
 typedef struct clientData_t 
 {
@@ -25,20 +27,27 @@ typedef struct clientData_t
     struct sockaddr_in clientAddr;
 } clientData_t;
 
-static const char* version = "1.0.0";
+static const char* version = "2.0.0";
 static volatile sig_atomic_t stop = 0;
 
 static int serverSockFd = 0;
 
+#if !USE_AESD_CHAR_DEVICE
 static pthread_t timestampThread = 0;
+#endif
 static pthread_t clientThreads[MAX_THREADS] = {0};
 static int threadCount = 0;
 
 static bool runAsDaemon = false;
+#if !USE_AESD_CHAR_DEVICE
 static bool timestampThreadStarted = false;
+#endif
 
 int pipeClientHandler[2]; // [0] for reading, [1] for writing
+
+#if !USE_AESD_CHAR_DEVICE
 int pipeTimestampWriterHandler[2]; // [0] for reading, [1] for writing
+#endif
 
 
 static pthread_mutex_t fileMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -121,12 +130,14 @@ void cleanupClientHandler(clientData_t* clientData, char** bufferPacket, uint8_t
 
 void cleanupMain(void) 
 {
+#if !USE_AESD_CHAR_DEVICE
     if (timestampThreadStarted && pipeTimestampWriterHandler[1] > 0) 
     {
         ssize_t res = write(pipeTimestampWriterHandler[1], "x", 1);
         (void)res; // Unused variable
         pthread_join(timestampThread, NULL);
     }
+#endif
     
     if (threadCount > 0 && pipeClientHandler[1] > 0) 
     {
@@ -150,7 +161,9 @@ void cleanupMain(void)
         close(serverSockFd);
     }
     syslog(LOG_INFO, "Server shutting down");
+#if !USE_AESD_CHAR_DEVICE
     remove("/var/tmp/aesdsocketdata");
+#endif
     closelog();
     printf("Server shutting down\n");
 }
@@ -234,6 +247,7 @@ void setSignalSIGTERMHandler(void)
 void* timestampWriterHandler(void* arg)
 {
     (void)arg; // Unused parameter
+#if !USE_AESD_CHAR_DEVICE
     while (1)
     {
         struct pollfd pfd;
@@ -276,6 +290,7 @@ void* timestampWriterHandler(void* arg)
             break;
         }
     }
+#endif
 
     pthread_exit(NULL);
 }
@@ -365,8 +380,13 @@ void* clientHandler(void* arg)
             {
                 pthread_mutex_lock(&fileMutex);
                 FILE *fptr;
-                fptr = fopen("/var/tmp/aesdsocketdata", "a");
 
+#if USE_AESD_CHAR_DEVICE
+                fptr = fopen("/dev/aesdchar", "a");
+#else
+                fptr = fopen("/var/tmp/aesdsocketdata", "a");
+#endif
+        
                 printf("Received data contains newline character\n");
                 for (size_t i = 0; i < bufferPacketIndex; i++)
                 {
@@ -382,7 +402,12 @@ void* clientHandler(void* arg)
                 char bufferSend[BUFFER_SIZE] = {0};
                 memset(bufferSend, 0, sizeof(bufferSend));
 
+#if USE_AESD_CHAR_DEVICE
+                fptr = fopen("/dev/aesdchar", "r");
+#else
                 fptr = fopen("/var/tmp/aesdsocketdata", "r");
+#endif
+
                 while (1)
                 {
                     size_t bytesRead = fread(bufferSend, 1, sizeof(bufferSend), fptr);
@@ -413,6 +438,7 @@ void* clientHandler(void* arg)
 }
 
 int main(int argc, char *argv[]) {
+    printf("Server type: %s\n", USE_AESD_CHAR_DEVICE == 1 ? "AESD_CHAR_DEVICE" : "VAR/TMP");
     printf("Server version: %s\n", version);
     openlog("Server", LOG_PID, LOG_USER);
 
@@ -488,20 +514,24 @@ int main(int argc, char *argv[]) {
 
     listen(serverSockFd, 5);
 
+#if !USE_AESD_CHAR_DEVICE
     if (pthread_create(&timestampThread, NULL, timestampWriterHandler, NULL) == 0) 
     {
         timestampThreadStarted = true;
     }
+#endif
 
     if (pipe(pipeClientHandler) < 0) 
     {
         logAndExit("Failed to create pipe for client handler", __FILE__, EXIT_FAILURE);
     }
 
+#if !USE_AESD_CHAR_DEVICE
     if (pipe(pipeTimestampWriterHandler) < 0) 
     {
         logAndExit("Failed to create pipe for timestamp writer handler", __FILE__, EXIT_FAILURE);
     }
+#endif
 
     while (!stop)
     {
