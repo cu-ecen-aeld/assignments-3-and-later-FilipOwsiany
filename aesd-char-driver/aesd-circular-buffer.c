@@ -10,14 +10,8 @@
 
 #ifdef __KERNEL__
     #include <linux/string.h>
-#else
-    #include <string.h>
-    #include <stdio.h>
-#endif
-
-
-#ifdef __KERNEL__
-    #include <linux/string.h>
+    #include <linux/stdarg.h>
+    #include <linux/slab.h>
 #else
     #include <stdlib.h>
     #include <string.h>
@@ -31,7 +25,11 @@ int my_printf(const char *format, ...)
    int done;
 
    va_start (arg, format);
+#ifdef __KERNEL__
+   done = vprintk(format, arg); 
+#else
    done = vfprintf (stdout, format, arg);
+#endif
    va_end (arg);
 
    return done;
@@ -44,12 +42,20 @@ void* my_memcpy(void* dest, const void* src, size_t n)
 
 void* my_malloc(size_t size)
 {
+#ifdef __KERNEL__
+    return kmalloc(size, GFP_KERNEL);
+#else
     return malloc(size);
+#endif
 }
 
 void my_free(void* ptr)
 {
+#ifdef __KERNEL__
+    kfree(ptr);
+#else
     free(ptr);
+#endif
 }
 
 void* my_memset(void*s, int c, size_t n)
@@ -88,8 +94,8 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
                     buffer_index, buffer->entry[buffer_index].buffptr);
         if (buffer->entry[buffer_index].buffptr != NULL) 
         {
-            my_printf("Checking entry %zu: buffptr: %s, size: %zu\n", 
-                    buffer_index, buffer->entry[buffer_index].buffptr, buffer->entry[buffer_index].size);
+            // my_printf("Checking entry %zu: buffptr: %s, size: %zu\n", 
+            //         buffer_index, buffer->entry[buffer_index].buffptr, buffer->entry[buffer_index].size);
             if(current_offset <= char_offset && 
                 char_offset < current_offset + buffer->entry[buffer_index].size) 
             {
@@ -155,7 +161,6 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     buffer->full = (buffer->in_offs == buffer->out_offs);
 }
 
-
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct
 */
@@ -169,3 +174,18 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
     my_printf("aesd_circular_buffer_init called\n");
     my_memset(buffer,0,sizeof(struct aesd_circular_buffer));
 }
+
+/**
+* Cleanup the circular buffer described by @param buffer
+*/
+void aesd_circular_buffer_cleanup(struct aesd_circular_buffer *buffer)
+{
+    for (size_t i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
+    {
+        if(buffer->entry[i].buffptr != NULL)
+        {
+            my_free(buffer->entry[i].buffptr);
+        }
+    }   
+}
+
