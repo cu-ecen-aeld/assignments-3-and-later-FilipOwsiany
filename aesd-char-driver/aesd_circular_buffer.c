@@ -1,5 +1,5 @@
 /**
- * @file aesd-circular-buffer.c
+ * @file aesd_circular_buffer.c
  * @brief Functions and data related to a circular buffer imlementation
  *
  * @author Dan Walkes
@@ -19,51 +19,8 @@
     #include <stdarg.h>
 #endif
 
-int my_printf(const char *format, ...)
-{
-   va_list arg;
-   int done;
-
-   va_start (arg, format);
-#ifdef __KERNEL__
-   done = vprintk(format, arg); 
-#else
-   done = vfprintf (stdout, format, arg);
-#endif
-   va_end (arg);
-
-   return done;
-}
-
-void* my_memcpy(void* dest, const void* src, size_t n)
-{
-    return memcpy(dest, src, n);
-}
-
-void* my_malloc(size_t size)
-{
-#ifdef __KERNEL__
-    return kmalloc(size, GFP_KERNEL);
-#else
-    return malloc(size);
-#endif
-}
-
-void my_free(void* ptr)
-{
-#ifdef __KERNEL__
-    kfree(ptr);
-#else
-    free(ptr);
-#endif
-}
-
-void* my_memset(void*s, int c, size_t n)
-{
-    return memset(s, c, n);
-}
-
-#include "aesd-circular-buffer.h"
+#include "aesd_circular_buffer.h"
+#include "common.h"
 
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
@@ -80,10 +37,10 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 {
     if (buffer == NULL || char_offset < 0) 
     {
-        my_printf("Error: Invalid parameters passed to aesd_circular_buffer_find_entry_offset_for_fpos\n");
+        PDEBUG("Error: Invalid parameters passed to aesd_circular_buffer_find_entry_offset_for_fpos\n");
         return NULL; // Handle null pointers gracefully
     }
-    my_printf("aesd_circular_buffer_find_entry_offset_for_fpos called with char_offset: %zu\n", char_offset);
+    PDEBUG("aesd_circular_buffer_find_entry_offset_for_fpos called with char_offset: %zu\n", char_offset);
     
     size_t current_offset = 0;
     size_t buffer_index = buffer->out_offs;
@@ -91,13 +48,11 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     size_t i;
     for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
     {   
-        my_printf("entry %zu\n", buffer_index);
-        my_printf("entry %zu: buffptr: %p\n", 
+        PDEBUG("entry %zu\n", buffer_index);
+        PDEBUG("entry %zu: buffptr: %p\n", 
                     buffer_index, buffer->entry[buffer_index].buffptr);
         if (buffer->entry[buffer_index].buffptr != NULL) 
         {
-            // my_printf("Checking entry %zu: buffptr: %s, size: %zu\n", 
-            //         buffer_index, buffer->entry[buffer_index].buffptr, buffer->entry[buffer_index].size);
             if(current_offset <= char_offset && 
                 char_offset < current_offset + buffer->entry[buffer_index].size) 
             {
@@ -105,7 +60,7 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
                 {
                     *entry_offset_byte_rtn = char_offset - current_offset;
                 }
-                my_printf("Found entry at index %zu with offset %zu\n", buffer_index, *entry_offset_byte_rtn);
+                PDEBUG("Found entry at index %zu with offset %zu\n", buffer_index, *entry_offset_byte_rtn);
                 return &buffer->entry[buffer_index];
             }
             current_offset += buffer->entry[buffer_index].size;
@@ -119,6 +74,58 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     return NULL;
 }
 
+extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_for_ioctl(struct aesd_circular_buffer *buffer,
+            size_t write_cmd, size_t write_cmd_offset, size_t *entry_offset_byte_rtn)
+{
+    if (buffer == NULL || write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED || write_cmd_offset < 0) 
+    {
+        PDEBUG("Error: Invalid parameters passed to aesd_circular_buffer_find_entry_for_ioctl\n");
+        return NULL; // Handle null pointers gracefully
+    }
+    PDEBUG("aesd_circular_buffer_find_entry_for_ioctl called with write_cmd: %zu, write_cmd_offset: %zu\n", write_cmd, write_cmd_offset);
+
+    size_t current_offset = 0;
+    size_t buffer_index = buffer->out_offs;
+
+    size_t i;
+    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++) 
+    {   
+        PDEBUG("entry %zu\n", buffer_index);
+        PDEBUG("entry %zu: buffptr: %p\n", 
+                    buffer_index, buffer->entry[buffer_index].buffptr);
+        if (buffer->entry[buffer_index].buffptr != NULL) 
+        {
+            if (i == write_cmd)
+            {
+                if (write_cmd_offset >= buffer->entry[buffer_index].size) 
+                {
+                    PDEBUG("Error: write_cmd_offset %zu exceeds size %zu of entry %zu\n", 
+                            write_cmd_offset, buffer->entry[buffer_index].size, buffer_index);
+
+                    *entry_offset_byte_rtn = 0;
+                    return NULL; // Invalid offset
+                }
+                PDEBUG("Found entry for ioctl at index %zu\n", buffer_index);
+                current_offset += write_cmd_offset;
+                if (entry_offset_byte_rtn != NULL) 
+                {
+                    *entry_offset_byte_rtn = current_offset;
+                }
+                return &buffer->entry[buffer_index];
+            }
+            current_offset += buffer->entry[buffer_index].size;
+        } 
+        else
+        {
+            *entry_offset_byte_rtn = 0;
+            return NULL;
+        }
+        buffer_index = (buffer_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
+    *entry_offset_byte_rtn = 0;
+    return NULL;
+}
+
 /**
 * Adds entry @param add_entry to @param buffer in the location specified in buffer->in_offs.
 * If the buffer was already full, overwrites the oldest entry and advances buffer->out_offs to the
@@ -128,19 +135,20 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 */
 void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    my_printf("aesd_circular_buffer_add_entry called\n");
+    PDEBUG("aesd_circular_buffer_add_entry called\n");
 
     if (!buffer || !add_entry) 
     {
-        my_printf("Error: add_entry or buffer is NULL\n");
+        PDEBUG("Error: add_entry or buffer is NULL\n");
         return;
     }
 
     // Jeśli bufor jest pełny, zwalniamy najstarszy wpis
     if (buffer->full) 
     {
-        my_printf("Buffer full. Overwriting entry at out_offs=%d\n", buffer->out_offs);
+        PDEBUG("Buffer full. Overwriting entry at out_offs=%d\n", buffer->out_offs);
         my_free((void *)buffer->entry[buffer->out_offs].buffptr);
+        buffer->size -= buffer->entry[buffer->out_offs].size;
         buffer->entry[buffer->out_offs].buffptr = NULL;
         buffer->entry[buffer->out_offs].size = 0;
 
@@ -151,14 +159,14 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     buffer->entry[buffer->in_offs].buffptr = my_malloc(add_entry->size);
     if (!buffer->entry[buffer->in_offs].buffptr) 
     {
-        my_printf("Error: Memory allocation failed\n");
+        PDEBUG("Error: Memory allocation failed\n");
         return;
     }
     my_memcpy((void *)buffer->entry[buffer->in_offs].buffptr, add_entry->buffptr, add_entry->size);
+    buffer->size += add_entry->size;
+    PDEBUG("Buffer size after adding entry: %zu\n", buffer->size);
     buffer->entry[buffer->in_offs].size = add_entry->size;
-
-    my_printf("Added entry at in_offs=%d, size=%zu\n", buffer->in_offs, add_entry->size);
-
+    PDEBUG("Added entry at in_offs=%d, size=%zu\n", buffer->in_offs, add_entry->size);
     buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     buffer->full = (buffer->in_offs == buffer->out_offs);
 }
@@ -170,10 +178,10 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
     if (buffer == NULL) 
     {
-        my_printf("Error: buffer is NULL\n");
+        PDEBUG("Error: buffer is NULL\n");
         return; // Handle null pointer gracefully
     }
-    my_printf("aesd_circular_buffer_init called\n");
+    PDEBUG("aesd_circular_buffer_init called\n");
     my_memset(buffer,0,sizeof(struct aesd_circular_buffer));
 }
 

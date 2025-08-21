@@ -15,10 +15,15 @@
 #include <poll.h>
 #include <pthread.h>
 
+#include "aesd_ioctl.h"
+#include "aesd_temperaty_buffer.h"
+
 #define BUFFER_SIZE             512
 #define MAX_THREADS             128
 
 #define USE_AESD_CHAR_DEVICE    1
+
+#define SEEK_CMD_PREFIX         "AESDCHAR_IOCSEEKTO:"
 
 typedef struct clientData_t 
 {
@@ -56,7 +61,7 @@ void    logAndExit(const char *msg, const char *filename, int exit_code);
 char**  bufferPacketCreate(void);
 void    bufferPacketDelete(char **bufferPacket);
 void    bufferPacketFree(char **bufferPacket, uint8_t* bufferPacketIndex);
-void    cleanupClientHandler(clientData_t* clientData, char** bufferPacket, uint8_t* bufferPacketIndex);
+void    cleanupClientHandler(clientData_t* clientData, struct aesd_temperary_buffer* buffer);
 void    cleanupMain(void);
 bool    checkForNullCharInString(const char *str, const ssize_t len);
 bool    checkForNewlineCharInString(const char *str, const ssize_t len, ssize_t *newlinePosition);
@@ -113,9 +118,13 @@ void bufferPacketFree(char **bufferPacket, uint8_t* bufferPacketIndex)
     *bufferPacketIndex = 0;
 }
 
-void cleanupClientHandler(clientData_t* clientData, char** bufferPacket, uint8_t* bufferPacketIndex) 
+void cleanupClientHandler(clientData_t* clientData, struct aesd_temperary_buffer* buffer) 
 {
-    bufferPacketFree(bufferPacket, bufferPacketIndex);
+    //bufferPacketFree(bufferPacket, bufferPacketIndex);
+    if (buffer != NULL) 
+    {
+        aesd_temperary_buffer_clean(buffer);
+    }
     if (clientData->newSockFd > 0) 
     {
         close(clientData->newSockFd);
@@ -206,6 +215,66 @@ bool checkForNewlineCharInString(const char *str, const ssize_t len, ssize_t *ne
         }
     }
     return false;
+}
+
+bool checkForCommandInString(const char *buffer, size_t size, struct aesd_seekto *command) 
+{
+    if (buffer == NULL || size == 0) 
+    {
+        syslog(LOG_WARNING, "Received NULL string or invalid length");
+        return false;
+    }
+
+    const size_t prefixLen = sizeof(SEEK_CMD_PREFIX) - 1;
+
+    if (size < prefixLen || strncmp(buffer, SEEK_CMD_PREFIX, prefixLen) != 0) 
+    {
+        return false;
+    }
+
+    const char* cmdPosition = strstr(buffer, SEEK_CMD_PREFIX);
+
+    if (cmdPosition == NULL) 
+    {
+        syslog(LOG_WARNING, "Command prefix not found in string");
+        return false;
+    }
+
+    const char* cmdFirstArg = cmdPosition + prefixLen;
+
+    char* endPosition;
+    unsigned long commandValue = strtoul(cmdFirstArg, &endPosition, 10); // Convert the command to an unsigned long
+
+    if (endPosition == cmdFirstArg) 
+    {
+        syslog(LOG_WARNING, "Invalid command format");
+        return false;
+    }
+
+    const char* cmdSecondArg = strstr(buffer, ",");
+
+    if (cmdSecondArg == NULL) 
+    {
+        syslog(LOG_WARNING, "Command second argument not found in string");
+        return false;
+    }
+
+    cmdSecondArg++; // Move past the colon
+
+    unsigned long offsetValue = strtoul(cmdSecondArg, &endPosition, 10); // Convert the offset to an unsigned long
+
+    if (endPosition == cmdSecondArg) 
+    {
+        syslog(LOG_WARNING, "Invalid offset format");
+        return false;
+    }
+
+    command->write_cmd = commandValue;
+    command->write_cmd_offset = offsetValue;
+
+    printf("Command found: write_cmd=%lu, write_cmd_offset=%lu\n", commandValue, offsetValue);
+
+    return true;
 }
 
 void SIGINTHandler(int signum, siginfo_t *info, void *extra)
@@ -299,8 +368,11 @@ void* clientHandler(void* arg)
 {
     clientData_t* clientData = (clientData_t*)arg;
     struct pollfd fds[2];
-    uint8_t bufferPacketIndex = 0;
-    char **bufferPacket = bufferPacketCreate();
+    // uint8_t bufferPacketIndex = 0;
+    // char **bufferPacket = bufferPacketCreate();
+
+    struct aesd_temperary_buffer bufferString = {0};
+    aesd_temperary_buffer_init(&bufferString);
 
     fds[0].fd = clientData->newSockFd;
     fds[0].events = POLLIN;
@@ -313,7 +385,7 @@ void* clientHandler(void* arg)
 
     while (1) 
     {
-        bufferPacketFree(bufferPacket, &bufferPacketIndex);
+        //bufferPacketFree(bufferPacket, &bufferPacketIndex);
         char *buffer = (char*) calloc(BUFFER_SIZE, sizeof(char));
 
         if (buffer == NULL) 
@@ -321,13 +393,13 @@ void* clientHandler(void* arg)
             logAndExit("Failed to allocate memory for buffer", __FILE__, EXIT_FAILURE);
         }
 
-        if (bufferPacketIndex >= 128) 
-        {
-            bufferPacketFree(bufferPacket, &bufferPacketIndex);
-            logAndExit("Buffer packet index exceeded limit", __FILE__, EXIT_FAILURE);
-        }
+        // if (bufferPacketIndex >= 128) 
+        // {
+        //     bufferPacketFree(bufferPacket, &bufferPacketIndex);
+        //     logAndExit("Buffer packet index exceeded limit", __FILE__, EXIT_FAILURE);
+        // }
 
-        bufferPacket[bufferPacketIndex++] = buffer;
+        // bufferPacket[bufferPacketIndex++] = buffer;
 
         int ret = poll(fds, 2, -1);
         if (ret == -1) 
@@ -353,86 +425,153 @@ void* clientHandler(void* arg)
                 buffer[recvLen] = '\0';
             }
 
+            if(aesd_temperary_buffer_add(&bufferString, buffer, recvLen) == false) 
+            {
+                free(buffer);
+                logAndExit("Failed to add data to temporary buffer", __FILE__, EXIT_FAILURE);
+            }
+
+            free(buffer);
+
             if (recvLen < 0) 
             {
-                bufferPacketFree(bufferPacket, &bufferPacketIndex);
+                aesd_temperary_buffer_clean(&bufferString);
+                //bufferPacketFree(bufferPacket, &bufferPacketIndex);
                 logAndExit("Failed to receive data", __FILE__, EXIT_FAILURE);
             } 
             else if (recvLen == 0) 
             {
                 syslog(LOG_INFO, "Closed connection from %s", inet_ntoa(clientData->clientAddr.sin_addr));
                 printf("Closed connection from %s\n", inet_ntoa(clientData->clientAddr.sin_addr));
-                bufferPacketFree(bufferPacket, &bufferPacketIndex);
+                aesd_temperary_buffer_clean(&bufferString);
+                //bufferPacketFree(bufferPacket, &bufferPacketIndex);
                 close(clientData->newSockFd);
                 break;
             }      
             
             printf("Received %zd bytes from %s\n", recvLen, inet_ntoa(clientData->clientAddr.sin_addr));
 
-            if (checkForNullCharInString(buffer, recvLen)) 
+            if (checkForNullCharInString(bufferString.buffptr, recvLen)) 
             {
-                bufferPacketFree(bufferPacket, &bufferPacketIndex);
+                //bufferPacketFree(bufferPacket, &bufferPacketIndex);
                 printf("Received data contains null character\n");
             }
 
             ssize_t newlinePosition = -1;
-            if (checkForNewlineCharInString(buffer, recvLen, &newlinePosition)) 
+            if (checkForNewlineCharInString(bufferString.buffptr, recvLen, &newlinePosition)) 
             {
+
                 pthread_mutex_lock(&fileMutex);
                 FILE *fptr;
+                struct aesd_seekto command = {0};
 
-#if USE_AESD_CHAR_DEVICE
-                fptr = fopen("/dev/aesdchar", "a");
-#else
-                fptr = fopen("/var/tmp/aesdsocketdata", "a");
-#endif
-        
-                printf("Received data contains newline character\n");
-                for (size_t i = 0; i < bufferPacketIndex; i++)
+                if(checkForCommandInString(bufferString.buffptr, bufferString.size, &command) == true)
                 {
-                    if (bufferPacket[i] == NULL) 
-                    {
-                        continue;
-                    }
-                    printf("Writing to file (file descriptor %d): %s\n", clientData->newSockFd, bufferPacket[i]);
-                    fwrite(bufferPacket[i], 1, strlen(bufferPacket[i]), fptr);
-                }
-
-                fclose(fptr);
-                char bufferSend[BUFFER_SIZE] = {0};
-                memset(bufferSend, 0, sizeof(bufferSend));
-
 #if USE_AESD_CHAR_DEVICE
-                fptr = fopen("/dev/aesdchar", "r");
+                    fptr = fopen("/dev/aesdchar", "r+");
 #else
-                fptr = fopen("/var/tmp/aesdsocketdata", "r");
+                    fptr = fopen("/var/tmp/aesdsocketdata", "r+");
 #endif
 
-                while (1)
-                {
-                    size_t bytesRead = fread(bufferSend, 1, sizeof(bufferSend), fptr);
-                    if (bytesRead == 0) 
+                    if (ioctl(fileno(fptr), AESDCHAR_IOCSEEKTO, &command) < 0) 
                     {
-                        if (feof(fptr)) 
-                        {
-                            break;
-                        } 
-                        else 
-                        {
-                            logAndExit("Failed to read from file", __FILE__, EXIT_FAILURE);
-                        }
+                        perror("ioctl");
+                        pthread_mutex_unlock(&fileMutex);
+                        aesd_temperary_buffer_clean(&bufferString);
+                        logAndExit("Failed to seek in file", __FILE__, EXIT_FAILURE);
                     }
-                    send(clientData->newSockFd, bufferSend, bytesRead, 0);
+
+                    char bufferSend[BUFFER_SIZE] = {0};
                     memset(bufferSend, 0, sizeof(bufferSend));
+
+                    while (1)
+                    {
+                        size_t bytesRead = fread(bufferSend, 1, sizeof(bufferSend), fptr);
+                        if (bytesRead == 0) 
+                        {
+                            if (feof(fptr)) 
+                            {
+                                break;
+                            } 
+                            else 
+                            {
+                                logAndExit("Failed to read from file", __FILE__, EXIT_FAILURE);
+                            }
+                        }
+                        send(clientData->newSockFd, bufferSend, bytesRead, 0);
+                        memset(bufferSend, 0, sizeof(bufferSend));
+                    }               
+
+                    fclose(fptr);
+
                 }
-                fclose(fptr);
+                else
+                {
+#if USE_AESD_CHAR_DEVICE
+                    fptr = fopen("/dev/aesdchar", "a");
+#else
+                    fptr = fopen("/var/tmp/aesdsocketdata", "a");
+#endif
+            
+                    printf("Received data contains newline character\n");
+                    // for (size_t i = 0; i < bufferPacketIndex; i++)
+                    // {
+                    //     if (bufferPacket[i] == NULL) 
+                    //     {
+                    //         continue;
+                    //     }
+                        //printf("Writing to file (file descriptor %d): %s\n", clientData->newSockFd, bufferString.buffptr);
+
+                        printf("Writing to file (byte %ld):\n", bufferString.size);
+                        for (size_t i = 0; i < bufferString.size; i++)
+                        {
+                            printf("%c", bufferString.buffptr[i]);
+                        }
+                        printf("\n");
+                        
+
+
+                        fwrite(bufferString.buffptr, 1, bufferString.size, fptr);
+                    // }
+
+                    fclose(fptr);
+                    char bufferSend[BUFFER_SIZE] = {0};
+                    memset(bufferSend, 0, sizeof(bufferSend));
+
+#if USE_AESD_CHAR_DEVICE
+                    fptr = fopen("/dev/aesdchar", "r");
+#else
+                    fptr = fopen("/var/tmp/aesdsocketdata", "r");
+#endif
+
+                    while (1)
+                    {
+                        size_t bytesRead = fread(bufferSend, 1, sizeof(bufferSend), fptr);
+                        if (bytesRead == 0) 
+                        {
+                            if (feof(fptr)) 
+                            {
+                                break;
+                            } 
+                            else 
+                            {
+                                logAndExit("Failed to read from file", __FILE__, EXIT_FAILURE);
+                            }
+                        }
+                        send(clientData->newSockFd, bufferSend, bytesRead, 0);
+                        memset(bufferSend, 0, sizeof(bufferSend));
+                    }
+                    fclose(fptr);
+                }
+
                 pthread_mutex_unlock(&fileMutex);
+                aesd_temperary_buffer_clean(&bufferString);
             }
         }
     }
 
-    cleanupClientHandler(clientData, bufferPacket, &bufferPacketIndex);
-    bufferPacketDelete(bufferPacket);
+    cleanupClientHandler(clientData, &bufferString);
+    //bufferPacketDelete(bufferPacket);
     printf("Close client handler thread ID: %ld\n", syscall(SYS_gettid));
     pthread_exit(NULL);
 }

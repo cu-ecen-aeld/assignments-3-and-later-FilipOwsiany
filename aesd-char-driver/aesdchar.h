@@ -8,33 +8,16 @@
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
-#include "aesd-circular-buffer.h"
+#include "aesd_circular_buffer.h"
+#include "aesd_temperaty_buffer.h"
 
-#define AESD_DEBUG 1  //Remove comment on this line to enable debug
-
-#undef PDEBUG             /* undef it, just in case */
-#ifdef AESD_DEBUG
-#  ifdef __KERNEL__
-     /* This one if debugging is on, and kernel space */
-#    define PDEBUG(fmt, args...) printk( KERN_DEBUG "aesdchar: " fmt, ## args)
-#  else
-     /* This one for user space */
-#    define PDEBUG(fmt, args...) fprintf(stderr, fmt, ## args)
-#  endif
-#else
-#  define PDEBUG(fmt, args...) /* not debugging: nothing */
-#endif
+#include <linux/cdev.h>
 
 struct aesd_dev
 {
-    /**
-     * TODO: Add structure(s) and locks needed to complete assignment requirements
-     */
-    char*      current_command;                   /* Current command pointer    */
-    ssize_t    current_command_size;              /* Current command size       */
-    struct     aesd_circular_buffer *buffer;      /* Circular buffer pointer    */
-    struct     cdev cdev;                         /* Char device structure      */
+    struct     aesd_temperary_buffer *bufferTemperary; /* Temperary buffer pointer    */
+    struct     aesd_circular_buffer *bufferCircular;   /* Circular buffer pointer     */
+    struct     cdev cdev;                              /* Char device structure       */
 };
-
 
 #endif /* AESD_CHAR_DRIVER_AESDCHAR_H_ */
